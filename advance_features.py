@@ -11,7 +11,7 @@ warnings.filterwarnings("ignore")
 
 df =pd.read_csv("train.csv")
 new_df = df.sample(40000,random_state = 2)
-print(new_df.head())
+# print(new_df.head())
 
 # PREPROCESSING THE DATA
 def preprocess(q):
@@ -184,7 +184,7 @@ def preprocess(q):
 new_df["question1"] =new_df["question1"].apply(preprocess)
 new_df["question2"] = new_df["question2"].apply(preprocess)
 
-print(new_df.head())
+# print(new_df.head())
 
 # FEATURE ENGINEERING
 new_df['q1_len'] = new_df['question1'].str.len()
@@ -208,7 +208,7 @@ def total_words(row):
 new_df["word_total"] = new_df.apply(total_words ,axis =1)
 
 new_df["words_share"] = round(new_df["word_common"]/new_df["word_total"],2)
-print(new_df.head())
+# print(new_df.head())
 
 # ADVANCE FEATURES 
 from nltk.corpus import stopwords
@@ -240,7 +240,7 @@ def fetch_token_features(row):
     common_word_count = len(q1_words.intersection(q2_words))
 
     # get the common non stopwords from question pair 
-    common_stop_count = len(q1_words.intersection(q2_words))
+    common_stop_count = len(q1_stop.intersection(q2_stop))
 
     #  get the common tokens from question pair
     common_token_count = len(set(q1_token).intersection(set(q2_token)))
@@ -248,9 +248,9 @@ def fetch_token_features(row):
     token_features[0] = common_word_count / (min(len(q1_words),len(q2_words)) + SAFE_DIV)
     token_features[1] = common_word_count / (max(len(q1_words),len(q2_words)) + SAFE_DIV)
     token_features[2] = common_stop_count / (min(len(q1_stop),len(q2_stop)) + SAFE_DIV)
-    token_features[3] = common_stop_count / (min(len(q1_stop),len(q2_stop)) + SAFE_DIV)
+    token_features[3] = common_stop_count / (max(len(q1_stop),len(q2_stop)) + SAFE_DIV)
     token_features[4] = common_token_count / (min(len(q1_token),len(q2_token)) + SAFE_DIV)
-    token_features[5] = common_token_count / (min(len(q1_token),len(q2_token)) + SAFE_DIV)
+    token_features[5] = common_token_count / (max(len(q1_token),len(q2_token)) + SAFE_DIV)
 
     # last word is same or not 
     token_features[6] = int(q1_token[-1] == q2_token[-1])
@@ -259,3 +259,263 @@ def fetch_token_features(row):
     token_features[7] = int (q1_token[0]== q2_token[0])
 
     return token_features
+
+token_features = new_df.apply(fetch_token_features , axis=1)
+
+new_df["cwc_min"] = token_features.apply(lambda x: x[0])
+new_df["cwc_max"] = token_features.apply(lambda x: x[1])
+new_df["csc_min"] = token_features.apply(lambda x: x[2])
+new_df["csc_max"] = token_features.apply(lambda x: x[3])
+new_df["ctc_min"] = token_features.apply(lambda x: x[4])
+new_df["ctc_max"] = token_features.apply(lambda x: x[5])
+new_df["last_word_eq"] = token_features.apply(lambda x: x[6])
+new_df["first_word_eq"] = token_features.apply(lambda x: x[7])
+# print(new_df.head())
+
+import distance 
+def fetch_length_features(row):
+    q1= row['question1']
+    q2=row['question2']
+
+    length_features = [0.0]*3
+
+    # converting the sentence into tokens
+    q1_tokens = q1.split()
+    q2_tokens = q2.split()
+
+    if len(q1_tokens) == 0 or len(q2_tokens) == 0:
+        return length_features
+    
+    # absolute length features
+
+    length_features[0] = abs(len(q1_tokens) - len(q2_tokens)) 
+
+    # average token length of both questions
+    length_features[1]= (len(q1_tokens) +len(q2_tokens)) /2
+
+    strs =list(distance.lcsubstrings(q1,q2))
+    length_features[2] = len(strs[0]) / (min(len(q1),len(q2)) + 1)
+
+    return length_features
+
+length_features = new_df.apply(fetch_length_features ,axis=1)
+
+new_df["abs_len_diff"] = list(map(lambda x :x[0] , length_features))
+new_df["mean_len"] = list(map (lambda x : x[1] ,length_features))
+new_df["longest_substr_ratio"] = list(map(lambda x: x[2],length_features))
+
+# print(new_df.head())
+
+# FUZZY FEATURES
+from fuzzywuzzy import fuzz
+
+def fetch_fuzzy_features(row):
+    q1 = row["question1"]
+    q2 = row['question2']
+
+    fuzzy_features = [0.0]*4
+
+    # fuzz_ratio
+    fuzzy_features[0] = fuzz.QRatio(q1,q2)
+
+    # fuzzy_partial_ratio
+    fuzzy_features[1] = fuzz.partial_ratio(q1,q2)
+
+    # fuzz_sort_ratio
+    fuzzy_features[2] = fuzz.token_sort_ratio(q1,q2)
+
+    # token_set_ratio
+    fuzzy_features[3] = fuzz.token_set_ratio(q1,q2)
+
+    return fuzzy_features
+
+fuzz_features = new_df.apply(fetch_fuzzy_features ,axis =1)
+
+# creating new features columns for fuzzy features
+new_df["fuzz_ratio"] = list(map(lambda x :x[0] ,fuzz_features))
+new_df["fuzz_partial_ratio"] = list(map(lambda x : x[1] , fuzz_features))
+new_df["token_sort_ratio"] = list(map(lambda x : x[2] , fuzz_features)) 
+new_df["token_set_ratio"] = list(map(lambda x : x[3] , fuzz_features))
+
+
+# print(new_df.head())
+
+sns.pairplot(new_df[["ctc_min","cwc_min","csc_min","is_duplicate"]],hue="is_duplicate")
+# plt.show()
+
+sns.pairplot(new_df[["ctc_max","cwc_max","csc_max","is_duplicate"]],hue="is_duplicate")
+# plt.show()
+
+sns.pairplot(new_df[["last_word_eq" , "first_word_eq" , "is_duplicate"]] , hue= "is_duplicate")
+# plt.show()
+
+sns.pairplot(new_df[["mean_len" , "abs_len_diff","longest_substr_ratio" , "is_duplicate"]],hue= "is_duplicate")
+# plt.show()
+
+sns.pairplot(new_df[["fuzz_ratio","fuzz_partial_ratio","token_sort_ratio","token_set_ratio","is_duplicate"]],hue = "is_duplicate")
+# plt.show()
+
+# using TSNE for dimensionality reduction for 15 features (generated afetr cleaming the data ) to 3 dimension
+
+from sklearn.preprocessing import MinMaxScaler
+X = MinMaxScaler().fit_transform(new_df[['cwc_min','cwc_max','csc_min','csc_max','ctc_min','ctc_max','last_word_eq',"first_word_eq","mean_len" , "abs_len_diff","longest_substr_ratio" , "fuzz_ratio","fuzz_partial_ratio","token_sort_ratio","token_set_ratio"]])
+y = new_df['is_duplicate'].values
+print(X)  
+print(y)
+
+from sklearn.manifold import TSNE
+
+tsne2d =TSNE(
+    n_components = 2,
+    init = 'random' , #pca
+    random_state = 101,
+    method = "barnes_hut",
+    max_iter = 1000,
+    verbose = 2,
+    angle = 0.5
+).fit_transform(X)
+
+x_df = pd.DataFrame({'x':tsne2d[:,0], 'y':tsne2d[:,1] ,'label':y})
+
+tsne3d = TSNE(    n_components = 3,
+    init = 'random' , #pca
+    random_state = 101,
+    method = "barnes_hut",
+    max_iter = 1000,
+    verbose = 2,
+    angle = 0.5
+).fit_transform(X)
+
+
+ques_df = new_df[['question1','question2']]
+
+final_df = new_df.drop(columns=['id','qid1','qid2','question1','question2'])
+print(final_df.shape)
+final_df.head()
+
+
+from sklearn.feature_extraction.text import CountVectorizer
+# merge texts
+questions = list(ques_df['question1']) + list(ques_df['question2'])
+
+cv = CountVectorizer(max_features=3000)
+q1_arr, q2_arr = np.vsplit(cv.fit_transform(questions).toarray(),2)
+
+
+temp_df1 = pd.DataFrame(q1_arr, index= ques_df.index)
+temp_df2 = pd.DataFrame(q2_arr, index= ques_df.index)
+temp_df = pd.concat([temp_df1, temp_df2], axis=1)
+temp_df.shape
+
+
+final_df = pd.concat([final_df, temp_df], axis=1)
+print(final_df.shape)
+final_df.head()
+
+
+from sklearn.model_selection import train_test_split
+X_train,X_test,y_train,y_test = train_test_split(final_df.iloc[:,1:].values,final_df.iloc[:,0].values,test_size=0.2,random_state=1)
+
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+rf = RandomForestClassifier()
+rf.fit(X_train,y_train)
+y_pred = rf.predict(X_test)
+print("The accuracy model is : ", accuracy_score(y_test,y_pred))
+
+from xgboost import XGBClassifier
+xgb = XGBClassifier()
+xgb.fit(X_train,y_train)
+y_pred1 = xgb.predict(X_test)
+print("The accuracy score of the model is : " , accuracy_score(y_test,y_pred1))
+
+from sklearn.metrics import confusion_matrix
+
+# for random forest model
+print("The confusion matrix of RandomForest Model is: ", confusion_matrix(y_test,y_pred))
+
+# for xgboost model
+print("The confusion matrix of XGBoost Model is: ", confusion_matrix(y_test,y_pred1))
+
+def test_common_words(q1,q2):
+    w1 = set(map(lambda word: word.lower().strip(), q1.split(" ")))
+    w2 = set(map(lambda word: word.lower().strip(), q2.split(" ")))    
+    return len(w1 & w2)
+
+def test_total_words(q1,q2):
+    w1 = set(map(lambda word: word.lower().strip(), q1.split(" ")))
+    w2 = set(map(lambda word: word.lower().strip(), q2.split(" ")))    
+    return (len(w1) + len(w2))
+
+
+def test_fetch_token_features(q1,q2):
+    
+    SAFE_DIV = 0.0001 
+
+    STOP_WORDS = stopwords.words("english")
+    
+    token_features = [0.0]*8
+    
+    # Converting the Sentence into Tokens: 
+    q1_tokens = q1.split()
+    q2_tokens = q2.split()
+    
+    if len(q1_tokens) == 0 or len(q2_tokens) == 0:
+        return token_features
+
+    # Get the non-stopwords in Questions
+    q1_words = set([word for word in q1_tokens if word not in STOP_WORDS])
+    q2_words = set([word for word in q2_tokens if word not in STOP_WORDS])
+    
+    #Get the stopwords in Questions
+    q1_stops = set([word for word in q1_tokens if word in STOP_WORDS])
+    q2_stops = set([word for word in q2_tokens if word in STOP_WORDS])
+    
+    # Get the common non-stopwords from Question pair
+    common_word_count = len(q1_words.intersection(q2_words))
+    
+    # Get the common stopwords from Question pair
+    common_stop_count = len(q1_stops.intersection(q2_stops))
+    
+    # Get the common Tokens from Question pair
+    common_token_count = len(set(q1_tokens).intersection(set(q2_tokens)))
+    
+    
+    token_features[0] = common_word_count / (min(len(q1_words), len(q2_words)) + SAFE_DIV)
+    token_features[1] = common_word_count / (max(len(q1_words), len(q2_words)) + SAFE_DIV)
+    token_features[2] = common_stop_count / (min(len(q1_stops), len(q2_stops)) + SAFE_DIV)
+    token_features[3] = common_stop_count / (max(len(q1_stops), len(q2_stops)) + SAFE_DIV)
+    token_features[4] = common_token_count / (min(len(q1_tokens), len(q2_tokens)) + SAFE_DIV)
+    token_features[5] = common_token_count / (max(len(q1_tokens), len(q2_tokens)) + SAFE_DIV)
+    
+    # Last word of both question is same or not
+    token_features[6] = int(q1_tokens[-1] == q2_tokens[-1])
+    
+    # First word of both question is same or not
+    token_features[7] = int(q1_tokens[0] == q2_tokens[0])
+    
+    return token_features
+
+def test_fetch_length_features(q1,q2):
+    
+    length_features = [0.0]*3
+    
+    # Converting the Sentence into Tokens: 
+    q1_tokens = q1.split()
+    q2_tokens = q2.split()
+    
+    if len(q1_tokens) == 0 or len(q2_tokens) == 0:
+        return length_features
+    
+    # Absolute length features
+    length_features[0] = abs(len(q1_tokens) - len(q2_tokens))
+    
+    #Average Token Length of both Questions
+    length_features[1] = (len(q1_tokens) + len(q2_tokens))/2
+    
+    strs = list(distance.lcsubstrings(q1, q2))
+    length_features[2] = len(strs[0]) / (min(len(q1), len(q2)) + 1)
+    
+    return length_features
+    
