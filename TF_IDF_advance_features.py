@@ -212,12 +212,13 @@ new_df["words_share"] = round(new_df["word_common"]/new_df["word_total"],2)
 
 # ADVANCE FEATURES 
 from nltk.corpus import stopwords
+stop_words = set(stopwords.words("english"))
+
 def fetch_token_features(row):
     q1=row['question1']
     q2=row['question2']
 
     SAFE_DIV = 0.0001
-    stop_words =stopwords.words("english")
     token_features =[0.0]*8
 
     # converting the sentence into tokens
@@ -272,6 +273,7 @@ new_df["last_word_eq"] = token_features.apply(lambda x: x[6])
 new_df["first_word_eq"] = token_features.apply(lambda x: x[7])
 # print(new_df.head())
 
+
 import distance 
 def fetch_length_features(row):
     q1= row['question1']
@@ -306,7 +308,7 @@ new_df["longest_substr_ratio"] = list(map(lambda x: x[2],length_features))
 
 # print(new_df.head())
 
-# FUZZY FEATURES
+# # FUZZY FEATURES
 from fuzzywuzzy import fuzz
 
 def fetch_fuzzy_features(row):
@@ -360,8 +362,8 @@ sns.pairplot(new_df[["fuzz_ratio","fuzz_partial_ratio","token_sort_ratio","token
 from sklearn.preprocessing import MinMaxScaler
 X = MinMaxScaler().fit_transform(new_df[['cwc_min','cwc_max','csc_min','csc_max','ctc_min','ctc_max','last_word_eq',"first_word_eq","mean_len" , "abs_len_diff","longest_substr_ratio" , "fuzz_ratio","fuzz_partial_ratio","token_sort_ratio","token_set_ratio"]])
 y = new_df['is_duplicate'].values
-print(X)  
-print(y)
+# print(X)  
+# print(y)
 
 from sklearn.manifold import TSNE
 
@@ -390,46 +392,98 @@ tsne3d = TSNE(    n_components = 3,
 ques_df = new_df[['question1','question2']]
 
 final_df = new_df.drop(columns=['id','qid1','qid2','question1','question2'])
-print(final_df.shape)
+# print(final_df.shape)
 final_df.head()
 
 
-from sklearn.feature_extraction.text import CountVectorizer
-# merge texts
-questions = list(ques_df['question1']) + list(ques_df['question2'])
+# Applying TF_IDF 
+from sklearn.feature_extraction.text import TfidfVectorizer
 
-cv = CountVectorizer(max_features=3000)
-q1_arr, q2_arr = np.vsplit(cv.fit_transform(questions).toarray(),2)
+questions = pd.concat([new_df['question1'], new_df['question2']]).unique()
+
+tfidf = TfidfVectorizer(
+    max_features=5000,
+    stop_words='english'
+)
+
+tfidf.fit(questions)
+
+q1_tfidf = tfidf.transform(new_df['question1'])
+q2_tfidf = tfidf.transform(new_df['question2'])
+
+# print(q1_tfidf.shape)
+# print(q2_tfidf.shape)
+# print(final_df.shape)
 
 
-temp_df1 = pd.DataFrame(q1_arr, index= ques_df.index)
-temp_df2 = pd.DataFrame(q2_arr, index= ques_df.index)
-temp_df = pd.concat([temp_df1, temp_df2], axis=1)
-temp_df.shape
+from scipy.sparse import csr_matrix, hstack
+
+print(final_df.columns.tolist())
+X_features = csr_matrix(final_df.iloc[:,1:].astype('float32').values)
 
 
-final_df = pd.concat([final_df, temp_df], axis=1)
-print(final_df.shape)
-final_df.head()
+X = hstack([
+    X_features,
+    q1_tfidf,
+    q2_tfidf
+])
+y = final_df.iloc[:,0].values
 
+print(X.shape)
+
+# from sklearn.feature_extraction.text import CountVectorizer
+# # merge texts
+# questions = list(ques_df['question1']) + list(ques_df['question2'])
+
+# cv = CountVectorizer(max_features=3000)
+# q1_arr, q2_arr = np.vsplit(cv.fit_transform(questions).toarray(),2)
+
+
+# temp_df1 = pd.DataFrame(q1_arr, index= ques_df.index)
+# temp_df2 = pd.DataFrame(q2_arr, index= ques_df.index)
+# temp_df = pd.concat([temp_df1, temp_df2], axis=1)
+# temp_df.shape
+
+
+# final_df = pd.concat([final_df, temp_df], axis=1)
+# # print(final_df.shape)
+# # final_df.head()
 
 from sklearn.model_selection import train_test_split
-X_train,X_test,y_train,y_test = train_test_split(final_df.iloc[:,1:].values,final_df.iloc[:,0].values,test_size=0.2,random_state=1)
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
 
-
+# Random Forest
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 rf = RandomForestClassifier()
 rf.fit(X_train,y_train)
 y_pred = rf.predict(X_test)
-print("The accuracy model is : ", accuracy_score(y_test,y_pred))
+print("The Random Forest accuracy_score is : ", accuracy_score(y_test,y_pred))
 
+# XGBoost
 from xgboost import XGBClassifier
-xgb = XGBClassifier()
-xgb.fit(X_train,y_train)
-y_pred1 = xgb.predict(X_test)
-print("The accuracy score of the model is : " , accuracy_score(y_test,y_pred1))
 
+xgb = XGBClassifier(
+    n_estimators=300,
+    max_depth=6,
+    learning_rate=0.1,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    eval_metric='logloss',
+    random_state=42
+)
+
+xgb.fit(X_train, y_train)
+y_pred1 = xgb.predict(X_test)
+print("The XGBoost accuracy_score is : " , accuracy_score(y_test,y_pred1))
+
+# CONFUSION MATRIX
 from sklearn.metrics import confusion_matrix
 
 # for random forest model
@@ -449,12 +503,10 @@ def test_total_words(q1,q2):
     return (len(w1) + len(w2))
 
 
+STOP_WORDS = set(stopwords.words("english"))
 def test_fetch_token_features(q1,q2):
     
-    SAFE_DIV = 0.0001 
-
-    STOP_WORDS = stopwords.words("english")
-    
+    SAFE_DIV = 0.0001     
     token_features = [0.0]*8
     
     # Converting the Sentence into Tokens: 
@@ -515,7 +567,107 @@ def test_fetch_length_features(q1,q2):
     length_features[1] = (len(q1_tokens) + len(q2_tokens))/2
     
     strs = list(distance.lcsubstrings(q1, q2))
-    length_features[2] = len(strs[0]) / (min(len(q1), len(q2)) + 1)
-    
+
+    if len(strs) > 0:
+        length_features[2] = len(strs[0]) / (min(len(q1), len(q2)) + 1)
+    else:
+        length_features[2] = 0
     return length_features
+
+def test_fetch_fuzzy_features(q1, q2):
+
+    fuzzy_features = [0.0] * 4
+
+    # fuzz_ratio
+    fuzzy_features[0] = fuzz.QRatio(q1, q2)
+
+    # fuzz_partial_ratio
+    fuzzy_features[1] = fuzz.partial_ratio(q1, q2)
+
+    # token_sort_ratio
+    fuzzy_features[2] = fuzz.token_sort_ratio(q1, q2)
+
+    # token_set_ratio
+    fuzzy_features[3] = fuzz.token_set_ratio(q1, q2)
+
+    return fuzzy_features
+
+def query_point_creator(q1,q2):
     
+    input_query = []
+    
+    # preprocess
+    q1 = preprocess(q1)
+    q2 = preprocess(q2)
+    
+    # fetch basic features
+    input_query.append(len(q1))
+    input_query.append(len(q2))
+    
+    input_query.append(len(q1.split(" ")))
+    input_query.append(len(q2.split(" ")))
+    
+    common = test_common_words(q1, q2)
+    total = test_total_words(q1, q2)
+
+    input_query.append(common)
+    input_query.append(total)
+
+    if total == 0:
+        input_query.append(0)
+    else:
+        input_query.append(round(common / total, 2))
+
+    # fetch token features
+    token_features = test_fetch_token_features(q1,q2)
+    input_query.extend(token_features)
+    
+    # fetch length based features
+    length_features = test_fetch_length_features(q1,q2)
+    input_query.extend(length_features)
+    
+    # fetch fuzzy features
+    fuzzy_features = test_fetch_fuzzy_features(q1,q2)
+    input_query.extend(fuzzy_features)
+    
+    # tfidf feature for q1
+    q1_tfidf1 = tfidf.transform([q1]).toarray()
+    
+    # tfidf feature for q2
+    q2_tfidf2 = tfidf.transform([q2]).toarray()
+
+    print("Q1:", q1)
+    print("Q2:", q2)
+
+    print("Basic + Advanced Features:")
+    print(input_query)
+
+    print("Token Features:", token_features)
+    print("Length Features:", length_features)
+    print("Fuzzy Features:", fuzzy_features)
+    return np.hstack((np.array(input_query).reshape(1,-1),q1_tfidf1 ,q2_tfidf2))
+
+query = query_point_creator(
+    "What is your name?",
+    "How many countries are there in the world?"
+)
+
+prediction = xgb.predict(query)
+
+if prediction[0] == 1:
+    print("Duplicate Questions")
+else:
+    print("Not Duplicate Questions") 
+
+q1 = preprocess("What is your name?")
+q2 = preprocess("How many countries are there in the world?")
+
+print(test_fetch_token_features(q1,q2))
+print(test_fetch_length_features(q1,q2))
+print(test_fetch_fuzzy_features(q1,q2))
+
+
+import pickle
+pickle.dump(xgb,open('model.pkl','wb'))
+pickle.dump(tfidf,open("tfidf.pkl",'wb'))
+
