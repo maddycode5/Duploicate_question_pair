@@ -4,7 +4,7 @@ A machine learning-based web application that predicts whether two questions are
 
 ### Tech Stack
 
-* Python
+* Python Language
 * Scikit-learn
 * XGBoost
 * NLTK
