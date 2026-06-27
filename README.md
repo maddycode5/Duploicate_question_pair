@@ -8,11 +8,11 @@ A machine learning-based web application that predicts whether two questions are
 * Scikit-learn
 * XGBoost
 * NLTK
-* Streamlit
+* Streamlit 
 
 ### Features
 
-* Text preprocessing and cleaning
+* Text preprocessing and cleaning Data
 * 22 handcrafted NLP similarity features
 * TF-IDF vectorization (5000 features)
 * Duplicate question prediction

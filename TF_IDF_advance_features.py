@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 df =pd.read_csv("train.csv")
-new_df = df.sample(40000,random_state = 2)
+new_df = df.sample(100000,random_state = 2)
 # print(new_df.head())
 
 # PREPROCESSING THE DATA
